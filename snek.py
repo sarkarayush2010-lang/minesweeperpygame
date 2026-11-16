@@ -9,6 +9,7 @@ GRAY = (200, 200, 200)
 DARKGRAY = (150, 150, 150)
 RED = (200, 50, 50)
 BLUE = (50, 50, 200)
+GREEN = (50, 180, 50)
 
 tile_size = 30
 top_bar_height = 50
@@ -18,7 +19,7 @@ def show_text(msg, x, y, color, size):
     msgobj = fontobj.render(msg, False, color)
     screen.blit(msgobj, (x, y))
 
-class tile:
+class Tile:
     def __init__(self, mine, x, y):
         self.clicked = False
         self.mine = mine
@@ -36,28 +37,46 @@ pygame.display.set_caption("Minesweeper")
 
 clock = pygame.time.Clock()
 
-grid_sizes = [10, 25, 50]
+grid_sizes = [10, 20, 30]
 current_size_idx = 0
 selected_grid_size = grid_sizes[current_size_idx]
 
 game_state = "MENU"
 board = []
 flags_placed = 0
-max_flags = 10
+max_flags = 0
 start_ticks = 0
+board_initialized = False
+final_time = 0
 
-def create_board(size):
-    global flags_placed, start_ticks
+def create_empty_board(size):
+    global flags_placed, board_initialized
     flags_placed = 0
-    start_ticks = pygame.time.get_ticks()
-    
-    board = []
+    board_initialized = False
+    new_board = []
     for row in range(size):
         row_tiles = []
         for col in range(size):
-            ismine = random.random() < 0.15
-            row_tiles.append(tile(ismine, col, row))
-        board.append(row_tiles)
+            row_tiles.append(Tile(False, col, row))
+        new_board.append(row_tiles)
+    return new_board
+
+def populate_board(size, safe_row, safe_col):
+    global max_flags, start_ticks, board_initialized
+    start_ticks = pygame.time.get_ticks()
+    
+    total_mines = 0
+    for row in range(size):
+        for col in range(size):
+            if abs(row - safe_row) <= 1 and abs(col - safe_col) <= 1:
+                board[row][col].mine = False
+            else:
+                ismine = random.random() < 0.15
+                board[row][col].mine = ismine
+                if ismine:
+                    total_mines += 1
+                    
+    max_flags = total_mines
     
     for row in range(size):
         for col in range(size):
@@ -70,7 +89,28 @@ def create_board(size):
                             if board[nr][nc].mine:
                                 count += 1
                 board[row][col].neighbor_mines = count
-    return board
+                
+    board_initialized = True
+
+def reveal_tile(r, c):
+    t = board[r][c]
+    if t.clicked or t.flagged:
+        return
+    t.clicked_on()
+    if t.neighbor_mines == 0 and not t.mine:
+        for dr in [-1, 0, 1]:
+            for dc in [-1, 0, 1]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < selected_grid_size and 0 <= nc < selected_grid_size:
+                    if not board[nr][nc].clicked:
+                        reveal_tile(nr, nc)
+
+def check_win_condition():
+    for row in board:
+        for t in row:
+            if not t.mine and not t.clicked:
+                return False
+    return True
 
 run = True
 while run:
@@ -96,14 +136,14 @@ while run:
                     game_state = "PLAYING"
                     screen = pygame.display.set_mode((window_width, window_height))
                     pygame.display.set_caption("Minesweeper")
-                    board = create_board(selected_grid_size)
+                    board = create_empty_board(selected_grid_size)
 
-            elif game_state == "GAMEOVER":
+            elif game_state == "GAMEOVER" or game_state == "WIN":
                 if 250 <= mx <= 550 and 350 <= my <= 420:
                     game_state = "PLAYING"
                     screen = pygame.display.set_mode((window_width, window_height))
                     pygame.display.set_caption("Minesweeper")
-                    board = create_board(selected_grid_size)
+                    board = create_empty_board(selected_grid_size)
                 elif 250 <= mx <= 550 and 450 <= my <= 520:
                     game_state = "MENU"
                     screen = pygame.display.set_mode((MENU_WIDTH, MENU_HEIGHT))
@@ -112,7 +152,7 @@ while run:
             elif game_state == "PLAYING":
                 if my < top_bar_height:
                     if window_width - 150 <= mx <= window_width - 80 and 10 <= my <= 40:
-                        board = create_board(selected_grid_size)
+                        board = create_empty_board(selected_grid_size)
                         game_state = "PLAYING"
                     elif window_width - 70 <= mx <= window_width - 10 and 10 <= my <= 40:
                         game_state = "MENU"
@@ -124,19 +164,24 @@ while run:
                     if 0 <= row < selected_grid_size and 0 <= col < selected_grid_size:
                         t = board[row][col]
                         if event.button == 1 and not t.flagged:
-                            t.clicked_on()
+                            if not board_initialized:
+                                populate_board(selected_grid_size, row, col)
+                                t = board[row][col]
+                            
                             if t.mine:
+                                t.clicked_on()
                                 game_state = "GAMEOVER"
                                 screen = pygame.display.set_mode((MENU_WIDTH, MENU_HEIGHT))
                                 pygame.display.set_caption("Minesweeper")
-                            elif t.neighbor_mines == 0:
-                                for dr in [-1, 0, 1]:
-                                    for dc in [-1, 0, 1]:
-                                        nr, nc = row + dr, col + dc
-                                        if 0 <= nr < selected_grid_size and 0 <= nc < selected_grid_size:
-                                            if not board[nr][nc].mine and not board[nr][nc].flagged:
-                                                board[nr][nc].clicked_on()
-                        elif event.button == 3:
+                            else:
+                                reveal_tile(row, col)
+                                if check_win_condition():
+                                    final_time = (pygame.time.get_ticks() - start_ticks) // 1000
+                                    game_state = "WIN"
+                                    screen = pygame.display.set_mode((MENU_WIDTH, MENU_HEIGHT))
+                                    pygame.display.set_caption("Minesweeper")
+                                
+                        elif event.button == 3 and board_initialized:
                             if not t.clicked:
                                 if t.flagged:
                                     t.flagged = False
@@ -157,10 +202,19 @@ while run:
         
         pygame.draw.rect(screen, DARKGRAY, (300, 420, 200, 60)) 
         show_text("START", 340, 432, WHITE, 52)
-        show_text("your first move may be a bomb. if you instantly lose, just try again", 100, 500, RED , 20)
 
     elif game_state == "GAMEOVER":
         show_text("GAME OVER", 280, 120, RED, 54)
+        
+        pygame.draw.rect(screen, DARKGRAY, (250, 350, 300, 70))
+        show_text("PLAY AGAIN", 290, 370, WHITE, 42)
+        
+        pygame.draw.rect(screen, DARKGRAY, (250, 450, 300, 70))
+        show_text("MAIN MENU", 290, 470, WHITE, 42)
+
+    elif game_state == "WIN":
+        show_text("YOU WIN!", 300, 100, GREEN, 54)
+        show_text("Time: " + str(final_time) + " seconds", 310, 180, BLACK, 32)
         
         pygame.draw.rect(screen, DARKGRAY, (250, 350, 300, 70))
         show_text("PLAY AGAIN", 290, 370, WHITE, 42)
@@ -190,7 +244,7 @@ while run:
         pygame.draw.rect(screen, GRAY, (0, 0, window_width, top_bar_height))
         pygame.draw.line(screen, BLACK, (0, top_bar_height), (window_width, top_bar_height), 2)
 
-        if game_state == "PLAYING":
+        if board_initialized:
             elapsed_time = (pygame.time.get_ticks() - start_ticks) // 1000
         else:
             elapsed_time = 0
